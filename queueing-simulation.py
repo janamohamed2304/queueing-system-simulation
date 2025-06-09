@@ -1,238 +1,129 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from collections import deque
-import random
+import matplotlib.pyplot as plt
 
-class MM1Queue:
-    def __init__(self, arrival_rate, service_rate, simulation_time=10000):
-      
-        self.lembda = arrival_rate/60
-        self.meu = service_rate/60
-        self.rho = self.lembda / self.meu 
+def theoretical_mm1(lam, mu):
+    rho = lam / mu
+    if rho >= 1:
+        return None
+    return {
+        'rho': rho,
+        'Ls': rho / (1 - rho),
+        'Lq': rho**2 / (1 - rho),
+        'Ws_mins': 60 / (mu - lam),
+        'Wq_mins': (lam / (mu * (mu - lam))) * 60,
+        'P': lambda n: (1 - rho) * rho**n
+    }
 
-        self.current_time = 0
-        self.next_arrival_time = self.generate_inter_arrival_time()
-        self.next_departure_time = float('inf')
-        
-        
-        self.ls = 0
-        self.lq = 0
-        self.customers_arrival_times = {}
-        self.service_time = {}
-        self.queue = deque()
-        self.system_states={}
-        self.system_state_counts = {}
-        self.customers_served = 0
-        self.total_system_time = 0
-        self.total_queue_time = 0
-        self.server_busy_time = 0
-        self.busy = False
-        self.simulation_time = simulation_time
-        
-        # Initialize missing variables
-        self.area_under_curve_system = 0
-        self.area_under_curve_queue = 0
-        
+class MM1Sim:
+    def __init__(self, lam, mu, sim_minutes=20000):
+        self.lam = lam / 60  # Convert to per minute
+        self.mu = mu / 60
+        self.T = sim_minutes
 
-    
-    def generate_inter_arrival_time(self):
-        y= np.random.exponential(1 / self.lembda)
-        print(f"yyyyyyyyy+{y}")
-        return y
-    
-    def generate_service_time(self):
-        x= np.random.exponential(1 / self.lembda)
-        print(f"xxxxxxxxx+{x}")
-        return x
+    def run(self):
+        t = 0
+        queue = deque()
+        busy = False
+        next_dep = np.inf
+        served = 0
+        total_wait_time = 0  # Total waiting time in queue
+        total_system_time = 0  # Total time in system
+        ns = 0
+        nts = {}
+        arrivals = []  # Store arrival times
 
-    
-    def update_statistics(self, time_elapsed):
-        
-        self.area_under_curve_system += self.ls * time_elapsed
-        self.area_under_curve_queue += self.lq * time_elapsed
+        next_arr = np.random.exponential(1 / self.lam)
 
-        state = self.ls
-        if state not in self.system_state_counts:
-            self.system_state_counts[state] = 0
-        self.system_state_counts[state] += time_elapsed
-        
-    
-    def simulate(self):
-       
-        while self.current_time < self.simulation_time:  
+        while t < self.T:
+            nxt = min(next_arr, next_dep)
+            # Track time-weighted number in system and queue
+            nts[ns] = nts.get(ns, 0) + (nxt - t)
+            t = nxt
 
-            # Fix: Calculate time_elapsed correctly using min()
-            time_elapsed = min(self.next_arrival_time, self.next_departure_time) - self.current_time
-            if time_elapsed > 0:
-                self.update_statistics(time_elapsed)
-            
-            if self.next_arrival_time < self.next_departure_time:  
-                self.current_time = self.next_arrival_time
-
-                # Fix: Use self.busy instead of undefined server_busy
-                if not self.busy:
-                    self.service_time = self.generate_service_time()
-                    self.next_departure_time = self.current_time + self.service_time
-                    self.busy = True  # Fix: Use self.busy
-                    self.ls += 1
-                   
+            if next_arr < next_dep:  # Arrival event
+                arrivals.append(t)
+                ns += 1
+                if not busy:
+                    busy = True
+                    next_dep = t + np.random.exponential(1 / self.mu)
                 else:
-                    self.queue.append(self.next_arrival_time)
-                    self.ls += 1
-                    self.lq += 1
-
-                inter_arrival_time = self.generate_inter_arrival_time()
-                self.next_arrival_time = self.current_time + inter_arrival_time
+                    queue.append(t)
+                next_arr = t + np.random.exponential(1 / self.lam)
+            else:  # Departure event
+                # Customer leaves - calculate their times
+                if arrivals:
+                    arrival_time = arrivals.pop(0)
+                    total_system_time += (t - arrival_time)
                 
-            else:
-                # Fix: Use self.next_departure_time instead of undefined next_departure_time
-                self.current_time = self.next_departure_time
-                self.customers_served += 1
-                self.ls -= 1
-                
-                if len(self.queue) > 0:
-
-                    arrival_time = self.queue.popleft() 
-                    self.lq -= 1
-                    
-
-                    queue_time = self.current_time - arrival_time  
-                    
-                    self.total_queue_time += queue_time
-                    
-                    service_time = self.generate_service_time()
-                    # Fix: Use self.next_departure_time consistently
-                    self.next_departure_time = self.current_time + service_time
-                    
-                    system_time = self.next_departure_time - arrival_time  
-                    self.total_system_time += system_time
-
+                if queue:
+                    # Customer was waiting in queue
+                    queue_arrival = queue.popleft()
+                    total_wait_time += (t - queue_arrival)
+                    next_dep = t + np.random.exponential(1 / self.mu)
                 else:
-                    self.busy = False
-                    self.next_departure_time = float('inf')  # Fix: Use self.next_departure_time
-                     
-        self.server_busy_time = self.simulation_time - sum(
-            time for state, time in self.system_state_counts.items() if state == 0
-        )
-    
-    def get_results(self):
+                    busy = False
+                    next_dep = np.inf
+                served += 1
+                ns -= 1
 
-        avg_customers_system = self.area_under_curve_system / self.simulation_time
-        avg_customers_queue = self.area_under_curve_queue / self.simulation_time
+        util = (self.T - nts.get(0, 0)) / self.T
         
-        avg_system_time = self.total_system_time / self.customers_served if self.customers_served > 0 else 0
-        avg_queue_time = self.total_queue_time / self.customers_served if self.customers_served > 0 else 0
-        
-        total_time = self.current_time  # Fix: Use simulation_time instead of current_time
-        probabilities = {state: time/total_time for state, time in self.system_state_counts.items()}
+        # Calculate averages
+        Ls_sim = sum(n * time for n, time in nts.items()) / self.T
+        Lq_sim = sum(max(0, n-1) * time for n, time in nts.items()) / self.T if busy else sum(n * time for n, time in nts.items()) / self.T
         
         return {
-            'customers_served': self.customers_served,
-            'avg_customers_system': avg_customers_system,
-            'avg_customers_queue': avg_customers_queue,
-            'avg_system_time_min': avg_system_time,
-            'avg_queue_time_min': avg_queue_time,
-            'server_utilization': self.server_busy_time / self.simulation_time,
-            'probabilities': probabilities
+            'served': served,
+            'Ls_sim': Ls_sim,
+            'Lq_sim': Lq_sim,
+            'Ws_sim': (total_system_time / served) if served else 0,
+            'Wq_sim': (total_wait_time / served) if served else 0,
+            'util_sim': util,
+            'nts': {n: time/self.T for n, time in nts.items()}
         }
 
-
-
-# def theoretical_calculations(lam, mu):
-
-#     # TODO: Calculate utilization factor ρ = λ/μ
-#     # TODO: Calculate Ls = ρ/(1-ρ)
-#     # TODO: Calculate Lq = ρ²/(1-ρ)
-#     # TODO: Calculate Ws = 1/(μ-λ)
-#     # TODO: Calculate Wq = λ/(μ(μ-λ))
-#     # TODO: Calculate probabilities Pn = (1-ρ)ρⁿ
-#     # TODO: Return all results in dictionary
-#     pass
-
-# def run_part1_theoretical():
-#     """
-#     Part 1: Manual theoretical calculations
-#     λ = 4 customers/hour, μ = 12 customers/hour
-#     """
-#     # TODO: Call theoretical_calculations function
-#     # TODO: Print all required results formatted nicely
-#     # TODO: Convert times to hours and minutes
-#     pass
-
-# Fix: Remove self parameter from standalone function
-def run_part2_simulation():
-    print("M/M/1 Queue Simulation Analysis")
-    print("=" * 50)
-
-    lembda = 5  
-    mu = 10  
-    
-    np.random.seed(42)  
-    queue_sim = MM1Queue(lembda, mu, simulation_time=100)
-    queue_sim.simulate()
-    sim_results = queue_sim.get_results()
-    
-    if sim_results:
-        print(f"Customers served: {sim_results['customers_served']}")
-        print(f"Average customers in system: {sim_results['avg_customers_system']:.4f}")
-        print(f"Average customers in queue: {sim_results['avg_customers_queue']:.4f}")
-        print(f"Average time in system: {sim_results['avg_system_time_min']:.2f} minutes")
-        print(f"Average time in queue: {sim_results['avg_queue_time_min']:.2f} minutes")
-        print(f"Server utilization: {sim_results['server_utilization']:.4f}")
-        print("State probabilities:")
-        for state in sorted(sim_results['probabilities'].keys())[:4]:
-            print(f"   P{state} = {sim_results['probabilities'].get(state, 0):.4f}")
-
-
-
-# def run_part3_comparison(theoretical_results, simulation_results):
-#     """
-#     Part 3: Compare theoretical and simulation results
-    
-#     Args:
-#         theoretical_results: results from theoretical calculations
-#         simulation_results: results from simulation
-#     """
-#     # TODO: Create comparison table
-#     # TODO: Calculate percentage differences
-#     # TODO: Print formatted table
-#     pass
-
-def run_bonus_analysis():
-    """
-    Bonus: Analysis for different utilization factors
-    """
-    # TODO: Define scenarios with different ρ values
-    # TODO: Run simulations for each scenario
-    # TODO: Collect Wq values
-    # TODO: Create plot comparing theoretical vs simulated Wq
-    # TODO: Add smooth theoretical curve
-    pass
-
-def demonstrate_arrival_process():
-    """
-    Optional: Demonstrate how arrivals are generated
-    """
-    # TODO: Show example of inter-arrival time generation
-    # TODO: Verify that mean matches 1/λ
-    pass
-
 if __name__ == "__main__":
-    print("M/M/1 Queue Analysis")
-    print("=" * 50)
-    
-    # # TODO: Run Part 1
-    # print("\nPart 1: Theoretical Calculations")
-    # theoretical_results = run_part1_theoretical()
-    
-    # TODO: Run Part 2  
-    print("\nPart 2: Simulation Results")
-    simulation_results = run_part2_simulation()
-    
-    # # TODO: Run Part 3
-    # print("\nPart 3: Comparison")
-    # run_part3_comparison(theoretical_results, simulation_results)
-    
-    # TODO: Run Bonus
-    print("\nBonus: Different Utilization Factors")
-    run_bonus_analysis()
+    scenarios = [(4, 12), (6, 12), (10.8, 12)]
+    np.random.seed(42)
+
+    rhos, Wqs_sim, Wqs_theor = [], [], []
+
+    for lam, mu in scenarios:
+        theor = theoretical_mm1(lam, mu)
+        sim = MM1Sim(lam, mu).run()
+
+        print(f"\nScenario: lam={lam}, mu={mu}")
+        print("Metric      Theoretical    Simulation")
+        print(f"rho         {theor['rho']:.4f}        {sim['util_sim']:.4f}")
+        print(f"Ls          {theor['Ls']:.4f}        {sim['Ls_sim']:.4f}")
+        print(f"Lq          {theor['Lq']:.4f}        {sim['Lq_sim']:.4f}")
+        print(f"Ws (min)    {theor['Ws_mins']:.4f}      {sim['Ws_sim']:.4f}")
+        print(f"Wq (min)    {theor['Wq_mins']:.4f}      {sim['Wq_sim']:.4f}")
+
+        # Print probabilities P0, P1, P2, P3
+        for n in range(4):
+            p_theor = theor['P'](n)
+            p_sim = sim['nts'].get(n, 0)
+            print(f"P{n}         Theor: {p_theor:.4f}, Sim: {p_sim:.4f}")
+
+        # Print time proportions
+        print("\nProportion of time with n customers:")
+        for n in sorted(sim['nts']):
+            print(f"n = {n}: {sim['nts'][n]:.4f}")
+
+        rhos.append(theor['rho'])
+        Wqs_sim.append(sim['Wq_sim'])
+        Wqs_theor.append(theor['Wq_mins'])
+
+    # Plot Wq vs rho - Fixed to show both lines on same plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(rhos, Wqs_theor, label='Theoretical Wq', marker='o', linewidth=2)
+    plt.plot(rhos, Wqs_sim, label='Simulated Wq', marker='x', linewidth=2)
+    plt.xlabel('Utilization (ρ)')
+    plt.ylabel('Avg Waiting Time in Queue (minutes)')
+    plt.title('Wq vs Utilization')
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
