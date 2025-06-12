@@ -116,10 +116,15 @@ if __name__ == "__main__":
         Wqs_sim.append(sim['Wq_sim'])
         Wqs_theor.append(theor['Wq_mins'])
 
-    # Plot Wq vs rho - Fixed to show both lines on same plot
+    # Prepare a smooth theoretical curve for Wq vs rho
+    rho_vals = np.linspace(0.01, 0.95, 100)
+    Wq_curve = [(r**2 / (1 - r)) / mu * 60 for r in rho_vals]  # Wq formula * 60 to convert to minutes
+
+    # Plot Wq vs rho with both the theoretical curve and scenario points
     plt.figure(figsize=(10, 6))
-    plt.plot(rhos, Wqs_theor, label='Theoretical Wq', marker='o', linewidth=2)
-    plt.plot(rhos, Wqs_sim, label='Simulated Wq', marker='x', linewidth=2)
+    plt.plot(rho_vals, Wq_curve, label='Theoretical Wq Curve', linestyle='--', color='blue')
+    plt.plot(rhos, Wqs_theor, label='Theoretical Wq (Scenarios)', marker='o', color='green', linewidth=2)
+    plt.plot(rhos, Wqs_sim, label='Simulated Wq', marker='x', color='red', linewidth=2)
     plt.xlabel('Utilization (ρ)')
     plt.ylabel('Avg Waiting Time in Queue (minutes)')
     plt.title('Wq vs Utilization')
